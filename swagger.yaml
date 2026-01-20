@@ -1,0 +1,1040 @@
+openapi: 3.0.0
+info:
+  title: Education CRM API
+  description: API for Attendance, Course and DirectorProfile (CRUD). Branch-related fields removed.
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:5000
+    description: Local development server
+info:
+  title: Finance API
+  version: 1.0.0
+  description: "CRM tizimi uchun kirim, chiqim va qarz hisobotlari API."
+servers:
+  - url: http://localhost:5000/api
+    description: Local server
+tags:
+  - name: Attendance
+    description: Davomat (attendance) ishlari
+  - name: Course
+    description: Kurslar
+  - name: DirectorProfile
+    description: Director profillari
+
+security:
+  - bearerAuth: []
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+
+    # ------------------------
+    # Finance schema
+    # ------------------------
+    Payment:
+      type: object
+      properties:
+        _id:
+          type: string
+          example: "64f8e5f9c9b7b2a1a2345678"
+        amount:
+          type: number
+          example: 500000
+        paymentDate:
+          type: string
+          format: date
+          example: "2025-12-01"
+        student:
+          type: object
+          properties:
+            _id:
+              type: string
+              example: "64f8e5f9c9b7b2a1a2345679"
+            firstName:
+              type: string
+              example: "Og'abek"
+            lastName:
+              type: string
+              example: "Ibragimov"
+            phoneNumber:
+              type: string
+              example: "+998901234567"
+        group:
+          type: object
+          properties:
+            _id:
+              type: string
+              example: "64f8e5f9c9b7b2a1a2345680"
+            name:
+              type: string
+              example: "Frontend Bootcamp"
+    ReportResponse:
+      type: object
+      properties:
+        total:
+          type: number
+          example: 5000000
+        detailedIncome:
+          type: array
+          items:
+            $ref: '#/components/schemas/Payment'
+        message:
+          type: string
+          example: "Umumiy kirim hisoboti"
+
+security:
+  - BearerAuth: []
+
+    # ------------------------
+    # Group schema
+    # ------------------------
+    Group:
+      type: object
+      required:
+        - name
+        - course
+        - teacher
+        - startDate
+        - schedule
+      properties:
+        _id:
+          type: string
+          example: "64a1f2d9f1234abc56789012"
+        name:
+          type: string
+          example: "A1 Guruh"
+        course:
+          type: string
+          example: "64a1f2d9f1234abc56789034"
+        teacher:
+          type: string
+          example: "64a1f2d9f1234abc56789056"
+        startDate:
+          type: string
+          format: date
+          example: "2025-12-01"
+        status:
+          type: string
+          enum: [Pending, Active, Completed, Canceled]
+          example: "Active"
+        schedule:
+          type: array
+          items:
+            type: object
+            properties:
+              day:
+                type: string
+                enum: [Dushanba, Seshanba, Chorshanba, Payshanba, Juma, Shanba, Yakshanba]
+                example: "Dushanba"
+              startTime:
+                type: string
+                example: "14:00"
+              endTime:
+                type: string
+                example: "16:00"
+        room:
+          type: string
+          nullable: true
+          example: "64a1f2d9f1234abc56789078"
+        students:
+          type: array
+          items:
+            type: string
+          example: ["64a1f2d9f1234abc56789090"]
+      
+
+    # ------------------------
+    # Course schema
+    # ------------------------
+    Course:
+      type: object
+      required:
+        - name
+        - durationMonths
+        - price
+      properties:
+        _id:
+          type: string
+          readOnly: true
+          example: 650a2f1c9f1b2a6f4b123456
+        name:
+          type: string
+          example: "Ingliz tili B1"
+          description: Kurs nomi (unique)
+        durationMonths:
+          type: integer
+          example: 6
+          description: Davomiylik oyda
+        price:
+          type: number
+          format: double
+          example: 900000
+          description: Kurs narxi (so'm)
+        isActive:
+          type: boolean
+          example: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CourseCreate:
+      type: object
+      required:
+        - name
+        - durationMonths
+        - price
+      properties:
+        name:
+          type: string
+          example: "Ingliz tili A2"
+        durationMonths:
+          type: integer
+          example: 3
+        price:
+          type: number
+          example: 450000
+
+    CourseUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        durationMonths:
+          type: integer
+        price:
+          type: number
+        isActive:
+          type: boolean
+
+    # ------------------------
+    # DirectorProfile schema
+    # ------------------------
+    DirectorProfile:
+      type: object
+      required:
+        - user
+        - salary
+        - hiringDate
+      properties:
+        _id:
+          type: string
+          readOnly: true
+          example: 650b3c2d8a2b4a7c5d987654
+        user:
+          type: string
+          description: User model _id (must have role 'Director')
+          example: 67a27b9e1c3f4c0012a4f9d2
+        salary:
+          type: number
+          example: 8000000
+        hiringDate:
+          type: string
+          format: date
+          example: "2025-01-15"
+        isActive:
+          type: boolean
+          example: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    DirectorProfileCreate:
+      type: object
+      required:
+        - userId
+        - salary
+        - hiringDate
+      properties:
+        userId:
+          type: string
+          example: 67a27b9e1c3f4c0012a4f9d2
+        salary:
+          type: number
+          example: 8000000
+        hiringDate:
+          type: string
+          format: date
+          example: "2025-01-15"
+
+    DirectorProfileUpdate:
+      type: object
+      properties:
+        salary:
+          type: number
+        hiringDate:
+          type: string
+          format: date
+        isActive:
+          type: boolean
+
+    # ------------------------
+    # Attendance schema
+    # ------------------------
+    AttendanceRecord:
+      type: object
+      required:
+        - student
+        - status
+      properties:
+        student:
+          type: string
+          description: Student _id
+          example: 66a11b22c33d44e55f667788
+        status:
+          type: string
+          enum: [Present, Absent, Late]
+          example: Present
+        chargedAmount:
+          type: number
+          example: 79166.66
+
+    Attendance:
+      type: object
+      required:
+        - group
+        - date
+        - records
+        - recordedBy
+      properties:
+        _id:
+          type: string
+          readOnly: true
+          example: 651c2b3a4d5e6f7890abcd12
+        group:
+          type: string
+          description: Group _id
+          example: 60f7c1d2e3a4b5c6d7e8f901
+        date:
+          type: string
+          format: date
+          example: "2025-11-29"
+        records:
+          type: array
+          items:
+            $ref: '#/components/schemas/AttendanceRecord'
+        recordedBy:
+          type: string
+          description: User _id who recorded attendance
+          example: 67a27b9e1c3f4c0012a4f9d2
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    AttendanceCreate:
+      type: object
+      required:
+        - group
+        - date
+        - records
+      properties:
+        group:
+          type: string
+          example: 60f7c1d2e3a4b5c6d7e8f901
+        date:
+          type: string
+          format: date
+          example: "2025-11-29"
+        records:
+          type: array
+          items:
+            $ref: '#/components/schemas/AttendanceRecord'
+          example:
+            - student: 66a11b22c33d44e55f667788
+              status: Present
+            - student: 66a11b22c33d44e55f667799
+              status: Absent
+
+    AttendanceUpdate:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+        records:
+          type: array
+          items:
+            $ref: '#/components/schemas/AttendanceRecord'
+    responses:
+    BadRequest:
+      description: Bad Request
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+                example: "Iltimos barcha maydonlarni to'ldiring."
+    NotFound:
+      description: Not Found
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+                example: "Topilmadi."
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+                example: "Sizda ruxsat yo'q."
+
+paths:
+
+  # ---------------------------------------------
+  # Finance endpoints
+  # ---------------------------------------------
+  /finance/income:
+    get:
+      summary: "Umumiy kirim hisoboti"
+      description: "Director va Managerlar uchun kirim hisoboti."
+      tags:
+        - Finance
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: query
+          name: startDate
+          schema:
+            type: string
+            format: date
+          description: "Hisobot boshlanish sanasi (optional)"
+        - in: query
+          name: endDate
+          schema:
+            type: string
+            format: date
+          description: "Hisobot tugash sanasi (optional)"
+      responses:
+        200:
+          description: "Kirim hisoboti muvaffaqiyatli qaytarildi"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportResponse'
+        401:
+          description: Unauthorized
+        403:
+          description: Forbidden
+  /finance/outcome:
+    get:
+      summary: "Umumiy chiqim hisoboti"
+      description: "Director va Adminlar uchun chiqim (maoshlar + o'qituvchi ulushi) hisoboti."
+      tags:
+        - Finance
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: query
+          name: startDate
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: endDate
+          schema:
+            type: string
+            format: date
+      responses:
+        200:
+          description: "Chiqim hisoboti muvaffaqiyatli qaytarildi"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: number
+                    example: 1000000
+                  detailedOutcome:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          example: "64f8e5f9c9b7b2a1a2345678"
+                        name:
+                          type: string
+                          example: "Og'abek Ibragimov"
+                        role:
+                          type: string
+                          example: "Teacher (Ulush)"
+                        totalAmount:
+                          type: number
+                          example: 200000
+                        lessonCount:
+                          type: number
+                          example: 4
+                  message:
+                    type: string
+                    example: "Umumiy chiqim hisoboti"
+  /finance/debt:
+    get:
+      summary: "Talabalarning qarz hisoboti"
+      description: "Director va Managerlar uchun umumiy qarz hisoboti."
+      tags:
+        - Finance
+      security:
+        - BearerAuth: []
+      responses:
+        200:
+          description: "Qarz hisoboti muvaffaqiyatli qaytarildi"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totalDebt:
+                    type: number
+                    example: 200000
+                  studentsWithDebt:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        _id:
+                          type: string
+                          example: "64f8e5f9c9b7b2a1a2345679"
+                        firstName:
+                          type: string
+                          example: "Og'abek"
+                        lastName:
+                          type: string
+                          example: "Ibragimov"
+                        group:
+                          type: string
+                          example: "Frontend Bootcamp"
+                        debtAmount:
+                          type: number
+                          example: 50000
+                        phoneNumber:
+                          type: string
+                          example: "+998901234567"
+                  message:
+                    type: string
+                    example: "Faol talabalarning umumiy qarz hisoboti"
+
+  # ---------------------------------------------
+  # Group endpoints
+  # ---------------------------------------------
+  /groups:
+    get:
+      summary: Barcha guruhlarni olish
+      tags: [Groups]
+      security:
+        - bearerAuth: []
+      responses:
+        200:
+          description: Guruhlar ro'yxati
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Group'
+    post:
+        summary: Yangi guruh yaratish
+        tags: [Groups]
+        security:
+          - bearerAuth: []
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
+        responses:
+          201:
+            description: Yaratilgan guruh
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/Group'
+          400:
+            description: Notog‘ri so‘rov
+    /groups/{id}:
+        get:
+          summary: Guruhni ID bo‘yicha olish
+          tags: [Groups]
+          security:
+            - bearerAuth: []
+          parameters:
+            - name: id
+              in: path
+              required: true
+              schema:
+                type: string
+          responses:
+            200:
+              description: Guruh ma'lumotlari
+              content:
+                application/json:
+                  schema:
+                    $ref: '#/components/schemas/Group'
+            404:
+              description: Guruh topilmadi
+    put:
+        summary: Guruhni yangilash
+        tags: [Groups]
+        security:
+          - bearerAuth: []
+        parameters:
+          - name: id
+            in: path
+            required: true
+            schema:
+              type: string
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
+        responses:
+          200:
+            description: Yangilangan guruh
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/Group'
+          400:
+            description: Notog‘ri so‘rov
+          404:
+            description: Guruh topilmadi
+    delete:
+        summary: Guruhni o'chirish
+        tags: [Groups]
+        security:
+          - bearerAuth: []
+        parameters:
+          - name: id
+            in: path
+            required: true
+            schema:
+              type: string
+        responses:
+          200:
+            description: Guruh muvaffaqiyatli o‘chirildi
+          404:
+            description: Guruh topilmadi
+
+  # ---------------------------------------------
+  # Course endpoints
+  # ---------------------------------------------
+  /api/courses:
+    get:
+      tags:
+        - Course
+      summary: Get all courses
+      description: Returns list of all courses. (Previous implementation filtered by req.user.branch — branch removed)
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Array of courses
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Course'
+    post:
+      tags:
+        - Course
+      summary: Create a course
+      description: Create a new course. Branch is derived from server side (if you still use req.user.branch); schema no longer requires branch in body.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CourseCreate'
+            example:
+              name: "Ingliz tili B1"
+              durationMonths: 6
+              price: 900000
+      responses:
+        '201':
+          description: Course created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Course'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/courses/{id}:
+    parameters:
+      - name: id
+        in: path
+        description: Course ID
+        required: true
+        schema:
+          type: string
+    get:
+      tags:
+        - Course
+      summary: Get course by ID
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Course object
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Course'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags:
+        - Course
+      summary: Update a course
+      description: Update name/duration/price/isActive
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CourseUpdate'
+            example:
+              name: "Ingliz tili B1 - yangilangan"
+              durationMonths: 8
+              price: 1000000
+              isActive: true
+      responses:
+        '200':
+          description: Updated course
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Course'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags:
+        - Course
+      summary: Delete a course
+      description: Delete course by ID
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Deletion success message
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Kurs muvaffaqiyatli o‘chirildi"
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # ---------------------------------------------
+  # DirectorProfile endpoints
+  # ---------------------------------------------
+  /api/directors:
+    get:
+      tags:
+        - DirectorProfile
+      summary: Get all director profiles
+      description: Returns director profiles. (primaryBranch field removed from schema)
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Array of director profiles
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DirectorProfile'
+    post:
+      tags:
+        - DirectorProfile
+      summary: Create a director profile
+      description: Create DirectorProfile. Provide userId (user must have Director role), salary and hiringDate.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DirectorProfileCreate'
+            example:
+              userId: "67a27b9e1c3f4c0012a4f9d2"
+              salary: 8000000
+              hiringDate: "2025-01-15"
+      responses:
+        '201':
+          description: Director profile created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DirectorProfile'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/directors/{id}:
+    parameters:
+      - name: id
+        in: path
+        description: DirectorProfile ID
+        required: true
+        schema:
+          type: string
+    get:
+      tags:
+        - DirectorProfile
+      summary: Get director profile by ID
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Director profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DirectorProfile'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags:
+        - DirectorProfile
+      summary: Update director profile
+      description: Director can only update own profile (enforced by controller). Fields: salary, hiringDate, isActive.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DirectorProfileUpdate'
+            example:
+              salary: 8500000
+              hiringDate: "2025-02-01"
+              isActive: true
+      responses:
+        '200':
+          description: Updated director profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DirectorProfile'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags:
+        - DirectorProfile
+      summary: Delete director profile
+      description: Director can delete own profile; cannot delete last active director (enforced in controller).
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Deletion success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Director profili o‘chirildi."
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ---------------------------------------------
+  # Attendance endpoints
+  # ---------------------------------------------
+  /api/attendance:
+    get:
+      tags:
+        - Attendance
+      summary: Get all attendance records
+      description: Returns all attendance documents. (Server-side filtering by branch removed.)
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Array of attendance records
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Attendance'
+    post:
+      tags:
+        - Attendance
+      summary: Create attendance record
+      description: Create attendance for a group on a given date. Ensures unique constraint (group + date).
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AttendanceCreate'
+            example:
+              group: "60f7c1d2e3a4b5c6d7e8f901"
+              date: "2025-11-29"
+              records:
+                - student: "66a11b22c33d44e55f667788"
+                  status: "Present"
+                - student: "66a11b22c33d44e55f667799"
+                  status: "Absent"
+      responses:
+        '201':
+          description: Attendance created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Attendance'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/attendance/{id}:
+    parameters:
+      - name: id
+        in: path
+        description: Attendance ID
+        required: true
+        schema:
+          type: string
+    get:
+      tags:
+        - Attendance
+      summary: Get attendance by ID
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Attendance object
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Attendance'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags:
+        - Attendance
+      summary: Update attendance
+      description: Update date or records. (Controller may restrict editing — adapt to your logic.)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AttendanceUpdate'
+            example:
+              records:
+                - student: "66a11b22c33d44e55f667788"
+                  status: "Late"
+                  chargedAmount: 79166.66
+      responses:
+        '200':
+          description: Updated attendance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Attendance'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags:
+        - Attendance
+      summary: Delete attendance
+      description: Delete attendance by ID. (Controller may restrict — allow only Director per policy.)
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Deletion success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Attendance o'chirildi."
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/attendance/group/{groupId}:
+    parameters:
+      - name: groupId
+        in: path
+        description: Group ID for which to get attendance records
+        required: true
+        schema:
+          type: string
+    get:
+      tags:
+        - Attendance
+      summary: Get attendance records by group
+      description: Return attendance documents filtered by group.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Array of attendance for the group
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Attendance'
+        '404':
+          $ref: '#/components/responses/NotFound'
