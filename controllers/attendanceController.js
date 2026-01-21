@@ -95,27 +95,46 @@ const bulkUpsertAttendance = asyncHandler(async (req, res) => {
     throw new Error('Guruh uchun o\'qituvchi user bog\'lanmagan.');
   }
 
-  // Create bulk operations
-  const ops = records.map((rec) => {
+  // De-duplicate by (studentId + date) inside the same payload to avoid E11000 errors
+  const dedupMap = new Map();
+  records.forEach((rec) => {
     const studentId = rec.studentId || rec.student;
-    return {
+    const key = `${studentId}|${date}`;
+    dedupMap.set(key, { ...rec, studentId });
+  });
+  const dedupedRecords = Array.from(dedupMap.values());
+
+  // Create bulk operations
+  const ops = dedupedRecords.map((rec) => ({
     updateOne: {
-      filter: { 
-        groupId: new mongoose.Types.ObjectId(groupId), 
-        studentId: new mongoose.Types.ObjectId(studentId), 
-        date 
+      filter: {
+        date,
+        $or: [
+          {
+            groupId: new mongoose.Types.ObjectId(groupId),
+            studentId: new mongoose.Types.ObjectId(rec.studentId),
+          },
+          {
+            group: new mongoose.Types.ObjectId(groupId),
+            student: new mongoose.Types.ObjectId(rec.studentId),
+          },
+        ],
       },
       update: {
         $set: {
           teacherId: teacherUserId,
           status: rec.status,
           reason: rec.reason || '',
+          // write both schemas to avoid null group in legacy indexes
+          groupId: new mongoose.Types.ObjectId(groupId),
+          studentId: new mongoose.Types.ObjectId(rec.studentId),
+          group: new mongoose.Types.ObjectId(groupId),
+          student: new mongoose.Types.ObjectId(rec.studentId),
         },
       },
       upsert: true,
     },
-    };
-  });
+  }));
 
   try {
     const result = await Attendance.bulkWrite(ops, { ordered: false });
@@ -137,7 +156,8 @@ const bulkUpsertAttendance = asyncHandler(async (req, res) => {
   } catch (error) {
     console.error('Bulk write error:', error);
     const message = error.message || 'Davomatni saqlashda xato';
-    return res.status(422).json({ message });
+    // Duplicate key or validation errors should still surface as client-friendly 400
+    return res.status(400).json({ message });
   }
 });
 

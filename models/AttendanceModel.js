@@ -13,6 +13,19 @@ const mongoose = require('mongoose');
  */
 const AttendanceSchema = mongoose.Schema(
   {
+    // Legacy fields (older schema)
+    group: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Group',
+      index: true,
+      default: null,
+    },
+    student: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Student',
+      index: true,
+      default: null,
+    },
     groupId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Group',
@@ -58,5 +71,19 @@ AttendanceSchema.index(
   { groupId: 1, studentId: 1, date: 1 },
   { unique: true, name: 'uniq_group_student_date' }
 );
+
+// Legacy-compatible unique index (for old controllers/queries)
+AttendanceSchema.index(
+  { group: 1, student: 1, date: 1 },
+  { unique: true, sparse: true, name: 'uniq_group_student_date_legacy' }
+);
+
+// Keep legacy/new fields in sync
+AttendanceSchema.pre('validate', function () {
+  if (this.groupId && !this.group) this.group = this.groupId;
+  if (this.studentId && !this.student) this.student = this.studentId;
+  if (this.group && !this.groupId) this.groupId = this.group;
+  if (this.student && !this.studentId) this.studentId = this.student;
+});
 
 module.exports = mongoose.model('Attendance', AttendanceSchema);

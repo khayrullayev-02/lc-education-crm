@@ -49,13 +49,13 @@ const getIncomeReport = asyncHandler(async (req, res) => {
 const getOutcomeReport = asyncHandler(async (req, res) => {
   const { startDate, endDate } = req.query;
 
-  if (!startDate || !endDate) {
-    res.status(400);
-    throw new Error("startDate va endDate majburiy (YYYY-MM-DD).");
-  }
+  // Allow optional dates; default to current month
+  const today = new Date();
+  const defaultStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
+  const defaultEnd = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 0));
 
-  const start = new Date(startDate);
-  const end = new Date(endDate);
+  const start = startDate ? new Date(startDate) : defaultStart;
+  const end = endDate ? new Date(endDate) : defaultEnd;
 
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
     res.status(400);
