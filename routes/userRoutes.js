@@ -10,6 +10,7 @@ const {
   deleteUser,
   getUserById,
   updateUser,
+  logoutUser,
 } = require('../controllers/userController');
 
 const { protect, authorizeRoles } = require('../middleware/authMiddleware');
@@ -31,6 +32,11 @@ router
   .route('/profile')
   .get(protect, getUserProfile)
   .put(protect, updateUserProfile);
+
+// ============================
+// LOGOUT ROUTE
+// ============================
+router.post('/logout', protect, logoutUser);
 
 // ============================
 // ADMIN ROUTES

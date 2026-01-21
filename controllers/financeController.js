@@ -1,12 +1,9 @@
 const asyncHandler = require('express-async-handler');
 const Payment = require('../models/PaymentModel');
-const Attendance = require('../models/AttendanceModel');
 const Student = require('../models/StudentModel');
-const Group = require('../models/GroupModel');
-const Course = require('../models/CourseModel');
-const AdminProfile = require('../models/AdminProfileModel'); 
+const AdminProfile = require('../models/AdminProfileModel');
 const ManagerProfile = require('../models/ManagerProfileModel');
-const TeacherProfile = require('../models/TeacherModel'); 
+const TeacherProfile = require('../models/TeacherModel');
 
 // @desc    Umumiy kirim (income) hisobotini olish
 // @route   GET /api/finance/income
@@ -50,111 +47,87 @@ const getIncomeReport = asyncHandler(async (req, res) => {
 // @route   GET /api/finance/outcome
 // @access  Private/Director, Admin
 const getOutcomeReport = asyncHandler(async (req, res) => {
-    const { startDate, endDate } = req.query; 
-    
-    const daysInPeriod = (new Date(endDate) - new Date(startDate)) / (1000 * 60 * 60 * 24);
-    const daysInMonth = 30; 
-    const monthlyRatio = daysInPeriod / daysInMonth; 
+  const { startDate, endDate } = req.query;
 
-    let totalOutcome = 0;
-    let detailedOutcome = [];
+  if (!startDate || !endDate) {
+    res.status(400);
+    throw new Error("startDate va endDate majburiy (YYYY-MM-DD).");
+  }
 
-    // --- 1. O'qituvchi ulushini hisoblash ---
-    let attendanceMatchQuery = {}; // branch filteri olib tashlandi
-    if (startDate && endDate) {
-        attendanceMatchQuery.date = { 
-            $gte: new Date(startDate), 
-            $lte: new Date(endDate) 
-        };
-    }
-    
-    const attendances = await Attendance.find(attendanceMatchQuery)
-        .populate({
-            path: 'group',
-            select: 'teacher course students',
-            populate: [
-                { path: 'teacher', select: 'firstName lastName' },
-                { path: 'course', select: 'price' }
-            ]
-        })
-        .select('records date');
+  const start = new Date(startDate);
+  const end = new Date(endDate);
 
-    let teacherPayouts = {};
-    
-    attendances.forEach(att => {
-        const group = att.group;
-        if (!group || !group.teacher || !group.course || !group.students) return;
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
+    res.status(400);
+    throw new Error("startDate va endDate qiymatlari noto'g'ri.");
+  }
 
-        const teacherId = group.teacher._id.toString();
-        const teacherName = `${group.teacher.firstName} ${group.teacher.lastName}`;
-        const monthlyPrice = group.course.price;
-        
-        const teacherShareRate = 0.4; 
-        const teacherSharePerLesson = (monthlyPrice * teacherShareRate) / 12; 
-        const activeStudentsCount = att.records.length; 
-        const lessonCost = activeStudentsCount * teacherSharePerLesson;
+  const daysInPeriod = (end - start) / (1000 * 60 * 60 * 24);
+  const daysInMonth = 30;
+  const monthlyRatio = daysInPeriod / daysInMonth;
 
-        totalOutcome += lessonCost;
+  let totalOutcome = 0;
+  const detailedOutcome = [];
 
-        if (!teacherPayouts[teacherId]) {
-            teacherPayouts[teacherId] = {
-                id: teacherId,
-                name: teacherName,
-                role: 'Teacher (Ulush)',
-                totalAmount: 0,
-                lessonCount: 0,
-            };
-        }
-        
-        teacherPayouts[teacherId].totalAmount += lessonCost;
-        teacherPayouts[teacherId].lessonCount += 1;
+  // --- 1. O'qituvchi (Teacher) maoshlari ---
+  const [teachers, managers, admins] = await Promise.all([
+    TeacherProfile.find({}).populate('user', 'firstName lastName'),
+    ManagerProfile.find({}).populate('user', 'firstName lastName'),
+    AdminProfile.find({}).populate('user', 'firstName lastName'),
+  ]);
+
+  teachers.forEach((teacher) => {
+    const baseSalary = teacher.salary || 0;
+    const salaryPortion = baseSalary * monthlyRatio;
+    totalOutcome += salaryPortion;
+
+    detailedOutcome.push({
+      id: teacher._id,
+      name: `${teacher.user.firstName} ${teacher.user.lastName}`,
+      role: 'Teacher (Oylik)',
+      totalAmount: salaryPortion,
+      monthlySalary: baseSalary,
+      periodDays: daysInPeriod,
     });
+  });
 
-    detailedOutcome = [...Object.values(teacherPayouts)];
+  // --- 2. Manager maoshlarini hisoblash ---
+  managers.forEach((manager) => {
+    const baseSalary = manager.salary || 0;
+    const salaryPortion = baseSalary * monthlyRatio;
+    totalOutcome += salaryPortion;
 
-    // --- 2. Manager maoshlarini hisoblash ---
-    const managers = await ManagerProfile.find({}) // branch filteri olib tashlandi
-        .populate('user', 'firstName lastName');
-
-    managers.forEach(manager => {
-        const salaryPortion = manager.salary * monthlyRatio; 
-        totalOutcome += salaryPortion;
-
-        detailedOutcome.push({
-            id: manager._id,
-            name: `${manager.user.firstName} ${manager.user.lastName}`,
-            role: 'Manager (Oylik)',
-            totalAmount: salaryPortion,
-            monthlySalary: manager.salary,
-            periodDays: daysInPeriod,
-        });
+    detailedOutcome.push({
+      id: manager._id,
+      name: `${manager.user.firstName} ${manager.user.lastName}`,
+      role: 'Manager (Oylik)',
+      totalAmount: salaryPortion,
+      monthlySalary: baseSalary,
+      periodDays: daysInPeriod,
     });
+  });
 
-    // --- 3. Admin maoshlarini hisoblash ---
-    const admins = await AdminProfile.find({})
-        .populate('user', 'firstName lastName');
+  // --- 3. Admin maoshlarini hisoblash ---
+  admins.forEach((admin) => {
+    const baseSalary = admin.salary || 0;
+    const salaryPortion = baseSalary * monthlyRatio;
+    totalOutcome += salaryPortion;
 
-    admins.forEach(admin => {
-        const salaryPortion = admin.salary * monthlyRatio; 
-        totalOutcome += salaryPortion;
-
-        detailedOutcome.push({
-            id: admin._id,
-            name: `${admin.user.firstName} ${admin.user.lastName}`,
-            role: 'Admin (Oylik)',
-            totalAmount: salaryPortion,
-            monthlySalary: admin.salary,
-            periodDays: daysInPeriod,
-        });
+    detailedOutcome.push({
+      id: admin._id,
+      name: `${admin.user.firstName} ${admin.user.lastName}`,
+      role: 'Admin (Oylik)',
+      totalAmount: salaryPortion,
+      monthlySalary: baseSalary,
+      periodDays: daysInPeriod,
     });
+  });
 
-    res.status(200).json({
-        total: totalOutcome,
-        detailedOutcome,
-        message: startDate && endDate 
-            ? `${startDate} dan ${endDate} gacha bo'lgan jami chiqim hisoboti (O'qituvchi ulushi + Maoshlar)` 
-            : "Umumiy chiqim hisoboti"
-    });
+  res.status(200).json({
+    total: totalOutcome,
+    detailedOutcome,
+    message: `${startDate} dan ${endDate} gacha bo'lgan jami chiqim hisoboti (Maoshlar)`,
+  });
 });
 
 // @desc    Talabalarning umumiy qarzini olish

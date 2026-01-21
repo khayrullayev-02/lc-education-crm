@@ -2,7 +2,7 @@ const asyncHandler = require('express-async-handler');
 const Group = require('../models/GroupModel');
 const Course = require('../models/CourseModel'); 
 const Teacher = require('../models/TeacherModel'); 
-const Room = require('../models/RoomModel')
+const Room = require('../models/RoomModel');
 const mongoose = require('mongoose'); // ID formatini tekshirish uchun qo'shildi
 
 // @desc    Barcha guruhlarni olish (RBAC: Teacher faqat o'z guruhlarini ko'radi)
@@ -27,7 +27,7 @@ const getGroups = asyncHandler(async (req, res) => {
     .populate('course', 'name')
     .populate({
         path: 'teacher',
-        select: 'user specialization',
+        select: 'user experience subjects',
         populate: { path: 'user', select: 'firstName lastName username' }
     })
     .populate('room', 'name capacity')
@@ -117,7 +117,7 @@ const getGroupById = asyncHandler(async (req, res) => {
     .populate('course', 'name')
     .populate({
         path: 'teacher',
-        select: 'user specialization',
+        select: 'user experience subjects',
         populate: { path: 'user', select: 'firstName lastName username' }
     })
     .populate('room', 'name capacity')

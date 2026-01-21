@@ -1,233 +1,273 @@
 const asyncHandler = require('express-async-handler');
+const mongoose = require('mongoose');
 const Attendance = require('../models/AttendanceModel');
 const Group = require('../models/GroupModel');
 const Student = require('../models/StudentModel');
-const Course = require('../models/CourseModel');
 const Teacher = require('../models/TeacherModel');
 
-// Dushanba=0, Seshanba=1, ... Yakshanba=6 uchun helper
-const dayMap = {
-    'Yakshanba': 0, 'Dushanba': 1, 'Seshanba': 2, 'Chorshanba': 3,
-    'Payshanba': 4, 'Juma': 5, 'Shanba': 6
+// RBAC helper: Teacher faqat o'z guruhiga ishlay oladi, boshqalar (Admin/Director/Manager) hammasini ko'radi
+const assertTeacherOwnsGroup = async (user, groupDoc) => {
+  if (['Admin', 'Director', 'Manager'].includes(user.role)) return;
+  if (user.role === 'Teacher') {
+    const teacherProfile = await Teacher.findOne({ user: user._id });
+    if (!teacherProfile || teacherProfile._id.toString() !== groupDoc.teacher._id.toString()) {
+      const err = new Error('Bu guruhga ruxsat yo\'q (faqat o\'z guruhlaringiz).');
+      err.statusCode = 403;
+      throw err;
+    }
+  }
 };
 
-// @desc    Yangi davomatni yaratish (RBAC: Teacher faqat o'z guruhlariga davomat yozadi)
-// @route   POST /api/attendance
-// @access  Private/Teacher, Admin, Manager
-const createAttendance = asyncHandler(async (req, res) => {
-    const { group: groupId, date: dateString, records } = req.body;
-    // const branch = req.user.branch;
-    const recordedBy = req.user._id;
+// @desc    CREATE/UPDATE attendance bulk (table save)
+// @route   POST /api/attendance/bulk
+// @access  Teacher (own group) + Admin/Director/Manager
+const bulkUpsertAttendance = asyncHandler(async (req, res) => {
+  // Accept legacy keys: groupId/group, studentId/student
+  const bodyGroupId = req.body.groupId || req.body.group;
+  const { date, records } = req.body;
+  const groupId = bodyGroupId;
+  
+  // Validate required fields
+  if (!groupId) {
+    res.status(400);
+    throw new Error('groupId majburiy.');
+  }
+  if (!date) {
+    res.status(400);
+    throw new Error('date majburiy.');
+  }
+  if (!records || !Array.isArray(records)) {
+    res.status(400);
+    throw new Error('records majburiy va array bo\'lishi kerak.');
+  }
+  if (records.length === 0) {
+    res.status(400);
+    throw new Error('records bo\'sh bo\'lmasligi kerak.');
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    res.status(400);
+    throw new Error('Sana formati YYYY-MM-DD bo\'lishi kerak.');
+  }
 
-    if (!groupId || !dateString || !records || records.length === 0) {
-        res.status(400);
-        throw new Error("Guruh, sana va davomat yozuvlari shart.");
+  // Validate each record
+  const validStatuses = ['present', 'absent', 'excused', 'late'];
+  for (let i = 0; i < records.length; i++) {
+    const rec = records[i];
+    const studentId = rec.studentId || rec.student;
+    if (!studentId) {
+      res.status(400);
+      throw new Error(`Record ${i + 1}: studentId majburiy.`);
     }
+    if (!rec.status) {
+      res.status(400);
+      throw new Error(`Record ${i + 1}: status majburiy.`);
+    }
+    if (!validStatuses.includes(rec.status)) {
+      res.status(400);
+      throw new Error(`Record ${i + 1}: status faqat ${validStatuses.join(', ')} bo'lishi mumkin. Berilgan: "${rec.status}"`);
+    }
+    // Validate studentId format
+    if (!mongoose.Types.ObjectId.isValid(studentId)) {
+      res.status(400);
+      throw new Error(`Record ${i + 1}: studentId formati yaroqsiz.`);
+    }
+  }
 
-    const attendanceDate = new Date(dateString);
-    attendanceDate.setHours(0, 0, 0, 0); // Vaqt qismini o'chiramiz
+  // Validate groupId format
+  if (!mongoose.Types.ObjectId.isValid(groupId)) {
+    res.status(400);
+    throw new Error('groupId formati yaroqsiz.');
+  }
 
-    // 1. Shu kunga davomat allaqachon mavjudligini tekshirish
-    // const existingAttendance = await Attendance.findOne({
-    //     group: groupId,
-    //     date: attendanceDate,
-    // });
-    const existingAttendance = await Attendance.findOne({
-        group: groupId,
-        date: {
-            $gte: attendanceDate,
-            $lte: new Date(attendanceDate.getTime() + 24 * 60 * 60 * 1000 - 1)
-        }
+  const groupDoc = await Group.findById(groupId).populate({
+    path: 'teacher',
+    populate: { path: 'user', select: '_id firstName lastName role' },
+  });
+  if (!groupDoc) {
+    res.status(404);
+    throw new Error('Guruh topilmadi.');
+  }
+
+  await assertTeacherOwnsGroup(req.user, groupDoc);
+  const teacherUserId = groupDoc.teacher?.user?._id;
+  if (!teacherUserId) {
+    res.status(400);
+    throw new Error('Guruh uchun o\'qituvchi user bog\'lanmagan.');
+  }
+
+  // Create bulk operations
+  const ops = records.map((rec) => {
+    const studentId = rec.studentId || rec.student;
+    return {
+    updateOne: {
+      filter: { 
+        groupId: new mongoose.Types.ObjectId(groupId), 
+        studentId: new mongoose.Types.ObjectId(studentId), 
+        date 
+      },
+      update: {
+        $set: {
+          teacherId: teacherUserId,
+          status: rec.status,
+          reason: rec.reason || '',
+        },
+      },
+      upsert: true,
+    },
+    };
+  });
+
+  try {
+    const result = await Attendance.bulkWrite(ops, { ordered: false });
+    
+    const updated = await Attendance.find({ groupId, date })
+      .populate('studentId', 'firstName lastName')
+      .lean();
+
+    res.status(200).json({
+      message: 'Davomat saqlandi (bulk upsert).',
+      count: updated.length,
+      records: updated,
+      bulkWriteResult: {
+        matched: result.matchedCount,
+        modified: result.modifiedCount,
+        upserted: result.upsertedCount,
+      },
     });
-    
-
-    if (existingAttendance) {
-        res.status(400);
-        throw new Error("Bu guruh uchun bugungi davomat allaqachon olingan.");
-    }
-
-    // 2. Guruh, kurs va talabalarni olish
-    const groupDoc = await Group.findById(groupId).populate('course');
-    // const groupDoc = await Group.findById(groupId).populate('course').select('+schedule'); // Schedule maydoni modelda bo'lsa
-    
-    if (!groupDoc) {
-        res.status(404);
-        throw new Error('Guruh topilmadi.');
-    }
-
-    // RBAC: Teacher faqat o'z guruhlariga davomat yozadi
-    if (req.user.role === 'Teacher') {
-        const teacherProfile = await Teacher.findOne({ user: req.user._id });
-        if (!teacherProfile || teacherProfile._id.toString() !== groupDoc.teacher.toString()) {
-            res.status(403);
-            throw new Error('Bu guruhga davomat yozish uchun ruxsat yo\'q. Faqat o\'z guruhlaringizga davomat yozishingiz mumkin.');
-        }
-    }
-    // if (groupDoc.branch.toString() !== branch.toString()) {
-    //     res.status(403);
-    //     throw new Error("Davomat faqat o'z filialidagi guruhlar uchun amalga oshirilishi mumkin.");
-    // }
-
-    // 3. Dars jadvalini va vaqtini tekshirish (Faqat Davomat so'rovi Dars kuni va vaqtida bo'lishi kerak)
-    
-    const currentDayIndex = new Date().getDay(); // 0 (Yakshanba) - 6 (Shanba)
-    const currentDayName = Object.keys(dayMap).find(key => dayMap[key] === currentDayIndex);
-
-    const todaySchedule = groupDoc.schedule.find(s => s.day === currentDayName);
-
-    if (!todaySchedule) {
-        res.status(400);
-        throw new Error(`Bugun (${currentDayName}) bu guruhning darsi yo'q. Davomatni faqat dars kuni olish mumkin.`);
-    }
-
-    // Vaqtni tekshirish (Faqat dars boshlanish va tugash oralig'ida ruxsat beriladi)
-    const now = new Date();
-    const [startHour, startMinute] = todaySchedule.startTime.split(':').map(Number);
-    const [endHour, endMinute] = todaySchedule.endTime.split(':').map(Number);
-    
-    // Dars boshlanadigan va tugaydigan vaqtni bugungi sanaga qo'yish
-    const startTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), startHour, startMinute, 0);
-    const endTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), endHour, endMinute, 0);
-    
-    // Agar so'rov vaqti dars oralig'ida bo'lmasa, bloklash (Ixtiyoriy: 30 daqiqa oldin/keyin ruxsat berish mumkin)
-    if (now < startTime || now > endTime) {
-        // res.status(400);
-        // throw new Error(`Davomatni faqat dars vaqtida (${todaySchedule.startTime} - ${todaySchedule.endTime}) olish mumkin.`);
-        // Note: Sinov oson bo'lishi uchun, bu blokni hozircha shunchaki console.log qilamiz
-        console.warn(`Davomat dars vaqtidan tashqarida yuborildi: ${now.toLocaleTimeString()}`);
-    }
-
-
-    // 4. Moliya hisoboti: Bir dars uchun narxni hisoblash
-    const course = await Course.findById(groupDoc.course);
-    if (!course) {
-        res.status(500);
-        throw new Error("Kurs ma'lumotlari topilmadi, narxni hisoblash imkonsiz.");
-    }
-
-    // Misol hisobi: Oylik 12 dars (haftada 3 marta)
-    const monthlyPrice = course.price;
-    const pricePerLesson = monthlyPrice / 12; // Bir dars uchun narx
-
-    let attendanceRecords = [];
-    let studentsToUpdate = [];
-
-    for (const record of records) {
-        const student = await Student.findById(record.student);
-        // if (!student || student.branch.toString() !== branch.toString()) {
-        //     continue; // Talaba topilmasa yoki boshqa filialga tegishli bo'lsa o'tkazib yuborish
-        // }
-        if (!student) {
-            continue;
-        }
-            
-
-        let chargedAmount = 0;
-        // let newDebt = student.debt || 0;
-        let newDebt = Number(student.debt) || 0;
-        
-        // Agar talaba kelgan yoki kechikkan bo'lsa (ya'ni darsda qatnashgan bo'lsa)
-        if (record.status === 'Present' || record.status === 'Late') {
-            
-            // Talabaning oldindan to'lovi yoki qarzi borligini tekshirish
-            // Agar qarzi manfiy bo'lsa (masalan, -950000), demak pul to'lagan va bu dars uchun puli bor
-            if (newDebt >= 0) { // Qarz nol yoki undan katta bo'lsa (Pul tugagan)
-                
-                // Bu dars uchun qarz hisoblash (minusga kirish)
-                chargedAmount = pricePerLesson;
-                newDebt -= pricePerLesson; // Masalan: 0 - 79166.66 = -79166.66 (qarz)
-                
-            } else { // newDebt manfiy bo'lsa (Pul hali bor - qarzni yopish uchun)
-                
-                // Dars puli mavjud qarzni kamaytiradi
-                chargedAmount = pricePerLesson;
-                newDebt += pricePerLesson; // Masalan: -950000 + 79166.66 = -870833.34 (qarzi kamaydi)
-            }
-        } 
-        
-        // Talaba modelini yangilash uchun ma'lumotlarni yig'ish
-        studentsToUpdate.push({
-            id: student._id,
-            debt: newDebt,
-        });
-
-        // Attendance record uchun ma'lumotlarni yig'ish
-        attendanceRecords.push({
-            student: record.student,
-            status: record.status,
-            chargedAmount: chargedAmount, // Bu summani Finance Controller ishlatadi
-        });
-    }
-
-    // 5. Talabalarni bitta so'rovda yangilash (StudentModel.js ni to'g'ri yangilash shart!)
-    const bulkOperations = studentsToUpdate.map(update => ({
-        updateOne: {
-            filter: { _id: update.id },
-            update: { $set: { debt: update.debt } }
-        }
-    }));
-    await Student.bulkWrite(bulkOperations);
-
-
-    // 6. Attendance yozuvini saqlash
-    const attendance = await Attendance.create({
-        group: groupId,
-        date: attendanceDate,
-        records: attendanceRecords,
-        recordedBy,
-        // branch,
-    });
-
-    res.status(201).json({
-        message: 'Davomat muvaffaqiyatli saqlandi va talabalar qarzi yangilandi.',
-        attendance
-    });
+  } catch (error) {
+    console.error('Bulk write error:', error);
+    const message = error.message || 'Davomatni saqlashda xato';
+    return res.status(422).json({ message });
+  }
 });
 
-// @desc    Guruh bo'yicha davomatlarni olish (RBAC: Teacher faqat o'z guruhlarining davomatini ko'radi)
-// @route   GET /api/attendance/:groupId
-// @access  Private
-const getAttendanceByGroup = asyncHandler(async (req, res) => {
-    const { groupId } = req.params;
-    // const branch = req.user.branch;
+// @desc    Attendance table for UI (students x dates)
+// @route   GET /api/attendance/table/:groupId?month=YYYY-MM
+// @access  Teacher (own group) + Admin/Director/Manager
+const getAttendanceTable = asyncHandler(async (req, res) => {
+  const { groupId } = req.params;
+  const { month } = req.query; // YYYY-MM
 
-    const groupDoc = await Group.findById(groupId);
-    
-    if (!groupDoc) {
-        res.status(404);
-        throw new Error('Guruh topilmadi.');
-    }
+  const groupDoc = await Group.findById(groupId).populate({
+    path: 'teacher',
+    populate: { path: 'user', select: '_id firstName lastName role' },
+  });
+  if (!groupDoc) {
+    res.status(404);
+    throw new Error('Guruh topilmadi.');
+  }
+  await assertTeacherOwnsGroup(req.user, groupDoc);
 
-    // RBAC: Teacher faqat o'z guruhlarining davomatini ko'radi
-    if (req.user.role === 'Teacher') {
-        const teacherProfile = await Teacher.findOne({ user: req.user._id });
-        if (!teacherProfile || teacherProfile._id.toString() !== groupDoc.teacher.toString()) {
-            res.status(403);
-            throw new Error('Bu guruhning davomatini ko\'rish uchun ruxsat yo\'q. Faqat o\'z guruhlaringizning davomatini ko\'ra olasiz.');
-        }
-    }
-    // if (!groupDoc || groupDoc.branch.toString() !== branch.toString()) {
-    //     res.status(404);
-    //     throw new Error('Guruh topilmadi yoki sizning filialingizga tegishli emas.');
-    // }
+  const students = await Student.find({ group: groupId, status: { $ne: 'Dropped' } })
+    .select('firstName lastName')
+    .lean();
 
-    const attendanceRecords = await Attendance.find({ 
-        group: groupId, 
-        // branch: branch 
-    })
-    .populate({
-        path: 'records.student',
-        select: 'firstName lastName phoneNumber' 
-    })
-    .select('-__v'); 
+  const query = { groupId };
+  if (month) query.date = { $regex: `^${month}` };
 
-    res.status(200).json(attendanceRecords);
+  const attendances = await Attendance.find(query)
+    .select('studentId date status reason')
+    .lean();
+
+  const attendanceMap = {};
+  attendances.forEach((a) => {
+    const sId = a.studentId.toString();
+    if (!attendanceMap[sId]) attendanceMap[sId] = {};
+    attendanceMap[sId][a.date] = { status: a.status, reason: a.reason };
+  });
+
+  const response = {
+    students: students.map((s) => ({
+      studentId: s._id,
+      fullName: `${s.firstName} ${s.lastName}`,
+      attendance: attendanceMap[s._id.toString()] || {},
+    })),
+  };
+
+  res.status(200).json(response);
 });
 
+// @desc    Get attendance by date for group
+// @route   GET /api/attendance/group/:groupId/date/:date
+// @access  Teacher (own group) + Admin/Director/Manager
+const getAttendanceByDate = asyncHandler(async (req, res) => {
+  const { groupId, date } = req.params;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    res.status(400);
+    throw new Error('Sana formati noto\'g\'ri (YYYY-MM-DD).');
+  }
+
+  const groupDoc = await Group.findById(groupId).populate({
+    path: 'teacher',
+    populate: { path: 'user', select: '_id role' },
+  });
+  if (!groupDoc) {
+    res.status(404);
+    throw new Error('Guruh topilmadi.');
+  }
+  await assertTeacherOwnsGroup(req.user, groupDoc);
+
+  // Guruhda barcha talabalarni olish
+  const students = await Student.find({ group: groupId, status: { $ne: 'Dropped' } })
+    .select('firstName lastName phoneNumber')
+    .lean();
+
+  // Mavjud davomatlarni olish
+  const attendances = await Attendance.find({ groupId, date })
+    .populate('studentId', 'firstName lastName phoneNumber')
+    .lean();
+
+  // Attendance map yaratish
+  const attendanceMap = {};
+  attendances.forEach(a => {
+    if (a.studentId) {
+      attendanceMap[a.studentId._id.toString()] = a;
+    }
+  });
+
+  // Barcha talabalar uchun davomat ro'yxatini shakllantirish
+  const result = students.map(student => {
+    const existing = attendanceMap[student._id.toString()];
+    if (existing) {
+      return existing;
+    }
+    // Davomat yo'q bo'lsa, default qiymat qaytarish
+    return {
+      _id: null,
+      groupId,
+      studentId: student,
+      date,
+      status: null, // Hali belgilanmagan
+      reason: '',
+    };
+  });
+
+  res.status(200).json(result);
+});
+
+// @desc    Delete attendance record (Admin/Director)
+// @route   DELETE /api/attendance/:id
+// @access  Admin/Director
+const deleteAttendance = asyncHandler(async (req, res) => {
+  if (!['Admin', 'Director'].includes(req.user.role)) {
+    res.status(403);
+    throw new Error('Faqat Admin/Director o\'chira oladi.');
+  }
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    res.status(400);
+    throw new Error('Attendance ID yaroqsiz.');
+  }
+  const deleted = await Attendance.findByIdAndDelete(req.params.id);
+  if (!deleted) {
+    res.status(404);
+    throw new Error('Attendance topilmadi.');
+  }
+  res.json({ message: 'Attendance o\'chirildi', id: req.params.id });
+});
 
 module.exports = {
-  createAttendance,
-  getAttendanceByGroup,
-  // Davomatni yangilashga/o'chirishga ruxsat bermaymiz, chunki bu moliyaviy hisob-kitobga ta'sir qiladi.
-  // Xato qilingan bo'lsa, ma'mur (Director) uni o'chirishi mumkin (DELETE route yaratiladi).
+  bulkUpsertAttendance,
+  getAttendanceTable,
+  getAttendanceByDate,
+  deleteAttendance,
 };

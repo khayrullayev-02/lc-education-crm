@@ -28,7 +28,7 @@ API_URL = http://localhost:8080
 ## ROLE-Based Access Control (RBAC)
 
 ### Director/Admin
-- **Hammasini ko'ra oladi**: Groups, Students, Teachers, Managers, Payments, Attendance, Finance, Stats, Notifications
+- **Hammasini ko'ra oladi**: Users, Groups, Students, Teachers, Managers, Payments, Attendance, Finance, Accountant, Stats, Notifications
 
 ### Manager
 - **Ko'ra oladi**: Finance, Attendance, Notifications, Payments, Groups (read), Students (read)
@@ -37,7 +37,7 @@ API_URL = http://localhost:8080
 ### Teacher
 - **Faqat o'z guruhlarini/o'quvchilarini ko'radi** (backend avtomatik filter qiladi)
 - **Ko'ra oladi**: O'z guruhlari, O'z guruhlaridagi o'quvchilar, O'z guruhlarining attendance, O'z guruhlaridagi payments, Notifications, O'z statistikasi
-- **Yozib qo'ya oladi**: O'z guruhlariga attendance, O'z guruhlaridagi o'quvchilar uchun payment
+- **Yozib qo'ya oladi**: O'z guruhlariga attendance (bulk), faqat o'z guruhlariga tegishli ma'lumotlar
 
 ### Student
 - **Faqat**: Notifications (read-only), O'zining paymentlarini ko'rish (agar backend ruxsat bersa)
@@ -48,32 +48,90 @@ API_URL = http://localhost:8080
 
 ## API Endpoints va Field Contracts
 
-### 1. ATTENDANCE
+### 1. ATTENDANCE (Davomat)
 
-#### POST /api/attendance
-**Body (majburiy)**:
+Davomat endi **normalizatsiya qilingan**: har bir `Attendance` hujjat `(groupId + studentId + date)` uchun bitta yozuv.
+
+#### 1.1 Bulk saqlash (jadvaldan)
+
+- **Endpoint**: `POST /api/attendance/bulk`
+- **Access**: `Director, Manager, Teacher, Admin` (Teacher – faqat o‘z guruhlari uchun)
+- **Body**:
 ```json
 {
-  "group": "GROUP_ID",
-  "date": "YYYY-MM-DD",
+  "groupId": "GROUP_ID",
+  "date": "2025-12-01",
   "records": [
-    { "student": "STUDENT_ID", "status": "Present" },
-    { "student": "STUDENT_ID", "status": "Absent" },
-    { "student": "STUDENT_ID", "status": "Late" }
+    { "studentId": "STUDENT_ID_1", "status": "present", "reason": "" },
+    { "studentId": "STUDENT_ID_2", "status": "absent", "reason": "Kasallik" },
+    { "studentId": "STUDENT_ID_3", "status": "late", "reason": "" }
   ]
 }
 ```
-- `status` faqat: `Present | Absent | Late`
-- `chargedAmount` yuborilmaydi (backend hisoblaydi)
+- `status` enum: `present | absent | excused | late`
 
-**Response**: `{ message, attendance }`
+**Response**:
+```json
+{
+  "message": "Davomat saqlandi (bulk upsert).",
+  "count": 12,
+  "records": [
+    {
+      "_id": "...",
+      "groupId": "GROUP_ID",
+      "studentId": { "_id": "STUDENT_ID_1", "firstName": "Ali", "lastName": "Valiyev" },
+      "teacherId": "USER_ID (Teacher)",
+      "date": "2025-12-01",
+      "status": "present",
+      "reason": ""
+    }
+  ]
+}
+```
 
-#### GET /api/attendance/:groupId
-**Response**: Array of attendance records
+#### 1.2 Guruh bo‘yicha oy jadvali (students x dates)
+
+- **Endpoint**: `GET /api/attendance/table/:groupId?month=YYYY-MM`
+- **Access**: `Director, Manager, Teacher, Admin` (Teacher – faqat o‘z guruhlari)
+
+**Response**:
+```json
+{
+  "students": [
+    {
+      "studentId": "STUDENT_ID",
+      "fullName": "Ali Valiyev",
+      "attendance": {
+        "2025-12-01": { "status": "present", "reason": "" },
+        "2025-12-02": { "status": "absent", "reason": "Kasallik" }
+      }
+    }
+  ]
+}
+```
+
+#### 1.3 Bitta sana bo‘yicha guruh davomati
+
+- **Endpoint**: `GET /api/attendance/group/:groupId/date/:date`
+- **Access**: `Director, Manager, Teacher, Admin` (Teacher – faqat o‘z guruhlari)
+
+**Response**: `Attendance[]` massiv, har birida `studentId` populate qilingan (`firstName, lastName, phoneNumber`).
+
+#### 1.4 Attendance o‘chirish
+
+- **Endpoint**: `DELETE /api/attendance/:id`
+- **Access**: `Admin, Director`
+- **Response**: `{ "message": "Attendance o‘chirildi", "id": "..." }`
 
 **UI**:
-- AttendanceCreatePage: group select + date picker + dynamic table (student, status dropdown)
-- AttendanceListByGroupPage: group tanlanganda GET bilan list
+- AttendanceTablePage:
+  - Group select
+  - Month picker (`YYYY-MM`)
+  - Jadval: rows = students, cols = dates, cell = status/tooltip(reason)
+  - "Saqlash" tugmasi `POST /api/attendance/bulk` ga ishlaydi.
+- AttendanceByDatePage:
+  - Group select + date picker
+  - Ro‘yxat ko‘rinishida talaba va statuslar
 
 ---
 
@@ -105,53 +163,77 @@ API_URL = http://localhost:8080
 
 ---
 
-### 3. FINANCE
+### 3. FINANCE (Umumiy moliya)
 
-#### GET /api/finance/income?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
-**Query params**: `startDate`, `endDate` (optional)
-**Access**: Director, Admin, Manager
+Bu bo‘lim direktor/administrator uchun **umumiy kirim-chiqim va qarz**ni ko‘rsatadi.
 
-**Response**:
+#### 3.1 Income (kirim)
+
+- **Endpoint**: `GET /api/finance/income?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD`
+- **Access**: `Director, Admin, Manager`
+- **Response**:
 ```json
 {
   "total": 5000000,
-  "detailedIncome": [...],
-  "message": "..."
+  "detailedIncome": [
+    {
+      "_id": "...",
+      "student": { "_id": "...", "firstName": "Ali", "lastName": "Valiyev", "phoneNumber": "+998..." },
+      "group": { "_id": "...", "name": "Frontend 101" },
+      "amount": 500000,
+      "type": "Cash",
+      "paymentDate": "2025-11-28T07:50:23.123Z"
+    }
+  ],
+  "message": "2025-11-01 dan 2025-11-30 gacha bo'lgan kirim hisoboti"
 }
 ```
 
-#### GET /api/finance/outcome?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
-**Query params**: `startDate`, `endDate` (required)
-**Access**: Director, Admin
+#### 3.2 Outcome (chiqim – maoshlar)
 
-**Response**:
+- **Endpoint**: `GET /api/finance/outcome?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD`
+- **Access**: `Director, Admin`
+- **Logic**: Berilgan davrdagi kunlar soniga qarab, oylik maoshdan **proportsional** ulush hisoblanadi.
+- **Response**:
 ```json
 {
   "total": 2000000,
   "detailedOutcome": [
-    { "id": "...", "name": "...", "role": "Teacher (Ulush)", "totalAmount": 500000, "lessonCount": 4 },
-    { "id": "...", "name": "...", "role": "Manager (Oylik)", "totalAmount": 3000000, "monthlySalary": 3000000 }
+    { "id": "...", "name": "...", "role": "Teacher (Oylik)", "totalAmount": 500000, "monthlySalary": 3000000, "periodDays": 15 },
+    { "id": "...", "name": "...", "role": "Manager (Oylik)", "totalAmount": 800000, "monthlySalary": 4800000, "periodDays": 15 },
+    { "id": "...", "name": "...", "role": "Admin (Oylik)",   "totalAmount": 700000, "monthlySalary": 4200000, "periodDays": 15 }
   ],
-  "message": "..."
+  "message": "2025-11-01 dan 2025-11-15 gacha bo'lgan jami chiqim hisoboti (Maoshlar)"
 }
 ```
 
-#### GET /api/finance/debt
-**Access**: Director, Admin, Manager
+#### 3.3 Debt (qarzdor talabalar)
 
-**Response**:
+- **Endpoint**: `GET /api/finance/debt`
+- **Access**: `Director, Admin, Manager`
+- **Response**:
 ```json
 {
   "totalDebt": 1500000,
   "studentsWithDebt": [
-    { "_id": "...", "firstName": "...", "lastName": "...", "debtAmount": 500000, "phoneNumber": "..." }
+    {
+      "_id": "...",
+      "firstName": "...",
+      "lastName": "...",
+      "debtAmount": 500000,
+      "phoneNumber": "...",
+      "group": "GROUP_ID"
+    }
   ],
-  "message": "..."
+  "message": "Faol talabalarning umumiy qarz hisoboti"
 }
 ```
 
 **UI**:
-- FinanceDashboardPage: date range filter, cards (total income/outcome/debt), tables
+- FinanceDashboardPage:
+  - Date range (`startDate`, `endDate`) filtr
+  - Kartochkalar: `total income`, `total outcome`, `total debt`
+  - Jadval: income va outcome tafsilotlari
 
 ---
 
@@ -349,6 +431,112 @@ API_URL = http://localhost:8080
 
 ### 9. TEACHERS
 
+---
+
+### 10. ACCOUNTANT MODULE (YANGI)
+
+Bu bo‘lim **buxgalter / accountant** uchun maxsus, oylik daromad, o‘qituvchi maoshlari va xarajatlar tahliliga mo‘ljallangan.
+
+#### 10.1 Dashboard
+
+- **Endpoint**: `GET /api/accountant/dashboard`
+- **Access**: `Admin, Accountant, Director`
+- **Response**:
+```json
+{
+  "totalStudents": 120,
+  "totalTeachers": 10,
+  "totalGroups": 15,
+  "totalCourses": 5,
+  "totalIncome": 25000000,
+  "totalExpense": 12000000,
+  "profit": 13000000
+}
+```
+
+#### 10.2 Talabalar to‘lovlari (oylik)
+
+- **Endpoint**: `GET /api/accountant/students/payments?month=YYYY-MM`
+- **Access**: `Admin, Accountant, Director`
+- **Response**:
+```json
+[
+  {
+    "studentName": "Ali Valiyev",
+    "groupName": "Frontend 101",
+    "coursePrice": 950000,
+    "paidAmount": 800000,
+    "debt": 150000,
+    "paymentStatus": "partial"   // paid | partial | unpaid
+  }
+]
+```
+
+#### 10.3 O‘qituvchi maoshlari (attendance + oylik)
+
+- **Endpoint**: `GET /api/accountant/teachers/salary?month=YYYY-MM`
+- **Access**: `Admin, Accountant, Director`
+- **Response**:
+```json
+[
+  {
+    "teacherName": "Ogabek Ibragimov",
+    "groupsCount": 3,
+    "studentsCount": 0,
+    "lessonsCount": 24,
+    "salaryAmount": 4500000
+  }
+]
+```
+
+#### 10.4 Income by days/months
+
+- **Endpoint**: `GET /api/accountant/income?from=YYYY-MM-DD&to=YYYY-MM-DD`
+- **Access**: `Admin, Accountant, Director`
+- **Response**:
+```json
+[
+  {
+    "_id": { "day": "2025-11-01", "month": "2025-11" },
+    "total": 1500000
+  }
+]
+```
+
+#### 10.5 Expense (soddalashtirilgan kategoriyalar)
+
+- **Endpoint**: `GET /api/accountant/expense?month=YYYY-MM`
+- **Access**: `Admin, Accountant, Director`
+- **Response**:
+```json
+{
+  "month": "2025-11",
+  "totalExpense": 8000000,
+  "categories": {
+    "teacherSalary": 5000000,
+    "managerSalary": 2000000,
+    "adminSalary": 1000000,
+    "rent": 0,
+    "advertising": 0,
+    "other": 0
+  }
+}
+```
+
+**UI**:
+- AccountantDashboardPage:
+  - Cards: totalIncome, totalExpense, profit, totalStudents, totalGroups
+  - Charts: income by month, income by day
+- AccountantStudentsPaymentsPage:
+  - `month` select
+  - Jadval: studentName, groupName, coursePrice, paidAmount, debt, paymentStatus (ranglar bilan)
+- AccountantTeachersSalaryPage:
+  - `month` select
+  - Jadval: teacherName, groupsCount, lessonsCount, salaryAmount
+- AccountantExpensePage:
+  - `month` select
+  - Pie/bar chart: categories bo‘yicha xarajatlar
+
 #### GET /api/teachers
 **Access**: Barcha kirganlar
 
@@ -409,7 +597,7 @@ src/
 ## UI Requirements
 
 1. **Sidebar Menu** (role-based):
-   - Director/Admin: Dashboard, Groups, Students, Teachers, Managers, Payments, Attendance, Finance, Stats, Notifications
+   - Director/Admin: Dashboard, Users, Groups, Students, Teachers, Managers, Payments, Attendance, Finance, Accountant, Stats, Notifications
    - Manager: Finance, Attendance, Notifications, Payments, Groups (read), Students (read)
    - Teacher: My Groups, My Students, Attendance, Payments, Notifications, My Stats
    - Student: Notifications

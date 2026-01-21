@@ -8,13 +8,28 @@ const Teacher = require('../models/TeacherModel');
 // @route   POST /api/payments
 // @access  Private/Director, Manager, Admin
 const createPayment = asyncHandler(async (req, res) => {
-  const { student, group, amount, type } = req.body;
+  const { student, group, amount, type, date } = req.body;
   // const branch = req.user.branch;
   const paidBy = req.user._id;
 
   if (!student || !group || !amount) {
     res.status(400);
     throw new Error("Iltimos, talaba, guruh va to'lov summasini kiriting.");
+  }
+
+  // Sana maydonini tekshirish va formatlash
+  let paymentDate = new Date();
+  if (date) {
+    // YYYY-MM-DD formatini tekshirish
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      res.status(400);
+      throw new Error("Sana formati noto'g'ri. YYYY-MM-DD formatida kiriting.");
+    }
+    paymentDate = new Date(date);
+    if (isNaN(paymentDate.getTime())) {
+      res.status(400);
+      throw new Error("Yaroqsiz sana.");
+    }
   }
 
   // 1. Talaba va Guruhning mavjudligini va filialga tegishliligini tekshirish
@@ -34,7 +49,7 @@ const createPayment = asyncHandler(async (req, res) => {
       throw new Error('Bu guruh uchun to\'lov qilish uchun ruxsat yo\'q. Faqat o\'z guruhlaringizdagi o\'quvchilar uchun to\'lov qilishingiz mumkin.');
     }
     // Talaba ham shu guruhga tegishli ekanligini tekshirish
-    if (studentDoc.group.toString() !== group.toString()) {
+    if (studentDoc.group && studentDoc.group.toString() !== group.toString()) {
       res.status(403);
       throw new Error('Talaba bu guruhga tegishli emas.');
     }
@@ -55,6 +70,7 @@ const createPayment = asyncHandler(async (req, res) => {
     group,
     amount,
     type,
+    paymentDate, // Sana maydoni (optional, default: hozirgi sana)
     // branch,
     paidBy,
   });
@@ -84,18 +100,40 @@ const createPayment = asyncHandler(async (req, res) => {
 
   // 5. Moliya hisoboti uchun yozuv yaratish (Bu keyingi qadamda qilinadi)
 
+  const paymentResponse = {
+    ...payment.toObject(),
+    date: payment.paymentDate ? payment.paymentDate.toISOString().split('T')[0] : undefined,
+  };
+
   res.status(201).json({
       message: "To'lov muvaffaqiyatli amalga oshirildi va talaba qarzi yangilandi.",
-      payment,
+      payment: paymentResponse,
       newDebt
   });
 });
 
-// @desc    Barcha to'lovlarni olish (RBAC: Teacher faqat o'z guruhlaridagi to'lovlarni ko'radi)
+// @desc    Barcha to'lovlarni olish (filtrlar bilan, paginatsiya bilan)
 // @route   GET /api/payments
 // @access  Private
+// Query:
+//  - student: STUDENT_ID
+//  - group: GROUP_ID
+//  - from: YYYY-MM-DD
+//  - to: YYYY-MM-DD
+//  - page, limit (ixtiyoriy, default: 1, 50)
+// Response:
+//  {
+//    items: [ { ...payment, student: { ... }, group: { ... } } ],
+//    total: 0
+//  }
 const getPayments = asyncHandler(async (req, res) => {
-  let query = {};
+  const { student, group, from, to } = req.query;
+  const page = parseInt(req.query.page, 10) || 1;
+  const limit = parseInt(req.query.limit, 10) || 50;
+  const skip = (page - 1) * limit;
+
+  const query = {};
+  let teacherGroupIds = null;
 
   // RBAC: Teacher faqat o'z guruhlaridagi to'lovlarni ko'radi
   if (req.user.role === 'Teacher') {
@@ -104,19 +142,53 @@ const getPayments = asyncHandler(async (req, res) => {
       res.status(404);
       throw new Error('O\'qituvchi profili topilmadi.');
     }
-    // O'qituvchining barcha guruhlarini topish
     const teacherGroups = await Group.find({ teacher: teacherProfile._id }).select('_id');
-    const groupIds = teacherGroups.map(g => g._id);
-    query.group = { $in: groupIds };
+    teacherGroupIds = teacherGroups.map((g) => g._id.toString());
   }
-  // Director, Manager, Admin hammasini ko'radi (query bo'sh qoladi)
 
-  const payments = await Payment.find(query)
-    .populate('student', 'firstName lastName')
-    .populate('group', 'name')
-    .select('-__v');
-    
-  res.status(200).json(payments);
+  if (student) {
+    query.student = student;
+  }
+
+  if (group) {
+    // Teacher faqat o'z guruhlaridan birini ko'rishi mumkin
+    if (teacherGroupIds && !teacherGroupIds.includes(group.toString())) {
+      res.status(403);
+      throw new Error('Bu guruh bo‘yicha to‘lovlarni ko‘rish uchun ruxsat yo‘q.');
+    }
+    query.group = group;
+  } else if (teacherGroupIds) {
+    // Teacher uchun barcha o'z guruhlari
+    query.group = { $in: teacherGroupIds };
+  }
+  if (from || to) {
+    query.paymentDate = {};
+    if (from) query.paymentDate.$gte = new Date(from);
+    if (to) query.paymentDate.$lte = new Date(to);
+  }
+
+  const [items, total] = await Promise.all([
+    Payment.find(query)
+      .populate('student', 'firstName lastName')
+      .populate('group', 'name')
+      .select('-__v')
+      .sort({ paymentDate: -1 })
+      .skip(skip)
+      .limit(limit),
+    Payment.countDocuments(query),
+  ]);
+
+  const mapped = items.map((p) => ({
+    _id: p._id,
+    student: p.student ? { _id: p.student._id, firstName: p.student.firstName, lastName: p.student.lastName } : null,
+    group: p.group ? { _id: p.group._id, name: p.group.name } : null,
+    amount: p.amount,
+    type: p.type,
+    date: p.paymentDate ? p.paymentDate.toISOString().split('T')[0] : undefined,
+    paymentDate: p.paymentDate,
+  }));
+
+  res.status(200).json({ items: mapped, total });
 });
 
 // @desc    To'lovni ID bo'yicha o'chirish (Pulni qaytarish)

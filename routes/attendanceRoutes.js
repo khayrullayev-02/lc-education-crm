@@ -1,23 +1,43 @@
 const express = require('express');
 const router = express.Router();
 const {
-  createAttendance,
-  getAttendanceByGroup,
+  bulkUpsertAttendance,
+  getAttendanceTable,
+  getAttendanceByDate,
+  deleteAttendance,
 } = require('../controllers/attendanceController');
 const { protect, authorizeRoles } = require('../middleware/authMiddleware');
 
-// Davomat yaratish/ko'rish
-router
-  .route('/')
-  .post(protect, authorizeRoles('Director', 'Manager', 'Teacher', 'Admin'), createAttendance); // Davomatni o'qituvchi, manager, director olishi mumkin
+// Bulk create/update (table save)
+router.post(
+  '/bulk',
+  protect,
+  authorizeRoles('Director', 'Manager', 'Teacher', 'Admin'),
+  bulkUpsertAttendance
+);
 
-// Guruh bo'yicha davomatlarni olish
-router
-  .route('/:groupId')
-  .get(protect, getAttendanceByGroup); // Barcha kirganlar (Teacher ham) ko'ra oladi
+// Attendance table (students x dates)
+router.get(
+  '/table/:groupId',
+  protect,
+  authorizeRoles('Director', 'Manager', 'Teacher', 'Admin'),
+  getAttendanceTable
+);
 
-// Davomatni o'chirish (Moliyaviy xavf tufayli faqat Directorga ruxsat beriladi)
-// YANGI: Davomatni o'chirish uchun Controller'ga funksiya qo'shishimiz kerak.
-// Hozircha bu route'ni shunday qoldiramiz va keyingi qadamda AttendanceController'ni to'ldiramiz.
+// Attendance by date
+router.get(
+  '/group/:groupId/date/:date',
+  protect,
+  authorizeRoles('Director', 'Manager', 'Teacher', 'Admin'),
+  getAttendanceByDate
+);
+
+// Delete attendance (Admin/Director)
+router.delete(
+  '/:id',
+  protect,
+  authorizeRoles('Director', 'Admin'),
+  deleteAttendance
+);
 
 module.exports = router;

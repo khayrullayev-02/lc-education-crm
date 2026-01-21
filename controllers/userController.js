@@ -16,19 +16,17 @@ const authUser = asyncHandler(async (req, res) => {
   });
 
   if (user && (await user.matchPassword(password))) {
-    res.json({
-      _id: user._id,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      username: user.username,
-      email: user.email,
-      role: user.role,
-      // branch: user.branch,
+    return res.json({
       token: generateToken(user._id),
+      user: {
+        _id: user._id,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        role: user.role,
+      },
     });
   } else {
-    res.status(401); // Unauthorized
-    throw new Error('Yaroqsiz username/email yoki parol.');
+    return res.status(401).json({ message: 'Unauthorized' });
   }
 });
 
@@ -37,19 +35,20 @@ const authUser = asyncHandler(async (req, res) => {
 // @access  Private (Faqat Director/Admin)
 
 const registerUser = asyncHandler(async (req, res) => {
-  // Ruxsatni tekshirish (faqat Director va Admin yangi foydalanuvchi yaratishi mumkin)
-  if (req.user.role !== 'Director' && req.user.role !== 'Admin') {
-    res.status(403);
-    throw new Error('Foydalanuvchini ro\'yxatdan o\'tkazish uchun ruxsat yo\'q. Faqat Director yoki Admin ruxsat beradi.');
-  }
-
-  // const { firstName, lastName, username, email, password, role, branch } = req.body;
   const { firstName, lastName, username, email, password, role } = req.body;
 
-  // Boshlang'ich majburiy maydonlarni tekshirish
-  if (!firstName || !lastName || !username || !email || !password || !role) {
+  // Ruxsat berilgan rollar (kontrakt)
+  const allowedRoles = ['Director', 'Admin', 'Manager', 'Teacher', 'Accountant', 'Student'];
+  if (role && !allowedRoles.includes(role)) {
     res.status(400);
-    throw new Error("Iltimos, Ism, Familiya, Username, Email, Parol va Role kabi barcha asosiy maydonlarni to'ldiring.");
+    throw new Error('Noto\'g\'ri role qiymati.');
+  }
+  const finalRole = role && allowedRoles.includes(role) ? role : 'Student';
+
+  // Boshlang'ich majburiy maydonlarni tekshirish
+  if (!firstName || !lastName || !username || !email || !password) {
+    res.status(400);
+    throw new Error("Iltimos, Ism, Familiya, Username, Email va Parol maydonlarini to'ldiring.");
   }
   
   // Rolga qarab qo'shimcha majburiy maydonlarni tekshirish (masalan, Branch ID)
@@ -72,17 +71,14 @@ const registerUser = asyncHandler(async (req, res) => {
     res.status(400);
     throw new Error('Bu username allaqachon band qilingan.');
   }
-  console.log('--- registerUser called ---');
-  console.log('req.user =', req.user);
-  console.log('req.headers[content-type] =', req.headers['content-type']);
-  console.log('req.body =', req.body);
   const user = await User.create({
     firstName,
     lastName,
     username,
     email,
     password,
-    role,
+    plainPassword: password,
+    role: finalRole,
     // branch, // Agar Director yoki Admin bo'lsa, bu 'undefined' bo'lishi mumkin (yaxshi)
   });
 
@@ -138,6 +134,7 @@ const updateUserProfile = asyncHandler(async (req, res) => {
     // Parolni yangilash
     if (req.body.password) {
       user.password = req.body.password;
+      user.plainPassword = req.body.password;
     }
     
     // Username yangilanishini tekshirish (agar o'zgartirilgan bo'lsa)
@@ -273,13 +270,21 @@ const updateUser = asyncHandler(async (req, res) => {
   user.lastName = req.body.lastName || user.lastName;
   
   // Rol, filial va isActive ni Director/Admin o'zgartirishi mumkin
-  user.role = req.body.role || user.role;
+  const allowedRoles = ['Director', 'Admin', 'Manager', 'Teacher', 'Accountant', 'Student'];
+  if (req.body.role) {
+    if (!allowedRoles.includes(req.body.role)) {
+      res.status(400);
+      throw new Error('Noto\'g\'ri role qiymati.');
+    }
+    user.role = req.body.role;
+  }
   // user.branch = req.body.branch || user.branch;
   user.isActive = req.body.isActive !== undefined ? req.body.isActive : user.isActive;
   
   // Parol yangilanishi
   if (req.body.password) {
       user.password = req.body.password;
+      user.plainPassword = req.body.password;
   }
 
   const updatedUser = await user.save();
@@ -333,6 +338,16 @@ const deleteUser = asyncHandler(async (req, res) => {
 });
 
 
+// @desc    Logout (token o'chirish - frontend'da localStorage'dan o'chiriladi)
+// @route   POST /api/users/logout
+// @access  Private
+const logoutUser = asyncHandler(async (req, res) => {
+  // Backend'da token blacklist qilish kerak bo'lsa, bu yerda qilinadi
+  // Hozircha faqat muvaffaqiyat xabari qaytaramiz
+  // Frontend localStorage'dan tokenni o'chiradi
+  res.status(200).json({ message: 'Muvaffaqiyatli chiqildi' });
+});
+
 module.exports = {
   authUser,
   registerUser,
@@ -342,4 +357,5 @@ module.exports = {
   getUserById,
   updateUser,
   deleteUser,
+  logoutUser,
 };

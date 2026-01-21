@@ -24,6 +24,8 @@ const directorRoutes = require('./routes/directorRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const authRoutes = require('./routes/authRoutes'); // 🔹 Auth route
 const statsRoutes = require('./routes/statsRoutes'); // 🔹 Stats route
+const accountantRoutes = require('./routes/accountantRoutes'); // 🔹 Accountant reports
+const dashboardRoutes = require('./routes/dashboardRoutes'); // 🔹 Dashboard routes
 
 // --- MongoDB ulanishi ---
 connectDB(); 
@@ -78,6 +80,8 @@ app.use('/api/managers', managerRoutes);
 app.use('/api/directors', directorRoutes); 
 app.use('/api/admins', adminRoutes);
 app.use('/api/stats', statsRoutes); // 🔹 Stats endpoints
+app.use('/api/accountant', accountantRoutes); // 🔹 Accountant reports
+app.use('/api/dashboard', dashboardRoutes); // 🔹 Dashboard endpoints
 
 // --- Xato Boshqarish Middleware ---
 app.use(notFound);   

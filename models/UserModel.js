@@ -29,8 +29,14 @@ const userSchema = mongoose.Schema(
       type: String,
       required: true,
       // NOTE: Controllerlarda 'Admin' roli ishlatiladi — enumda ham bo'lishi shart.
-      enum: ['SuperAdmin', 'Admin', 'Director', 'Manager', 'Teacher', 'Student'],
+      enum: ['SuperAdmin', 'Admin', 'Director', 'Manager', 'Teacher', 'Student', 'Accountant'],
       default: 'Student',
+    },
+    // Frontend kontrakti uchun: yaratilganda plain parolni vaqtinchalik saqlash (faqat ko'rsatish uchun).
+    // Eslatma: bu xavfsizlik nuqtai nazaridan minimal foydalanish uchun mo'ljallangan.
+    plainPassword: {
+      type: String,
+      default: undefined,
     },
     // branch: {
     //   type: mongoose.Schema.Types.ObjectId,

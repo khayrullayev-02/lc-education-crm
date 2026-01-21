@@ -12,7 +12,7 @@ const { protect, authorizeRoles } = require('../middleware/authMiddleware');
 router
   .route('/')
   .get(protect, getStudents)
-  .post(protect, authorizeRoles('Director', 'Manager', 'Admin'), createStudent);
+  .post(protect, authorizeRoles('Director', 'Manager', 'Admin', 'Teacher'), createStudent);
 
 router
   .route('/:id')

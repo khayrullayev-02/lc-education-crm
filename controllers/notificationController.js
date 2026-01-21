@@ -1,6 +1,6 @@
 const asyncHandler = require('express-async-handler');
 const Student = require('../models/StudentModel');
-const Group = require('../models/GroupModel')
+const Group = require('../models/GroupModel');
 const Attendance = require('../models/AttendanceModel');
 
 // @desc    Qarzi tugash arafasidagi talabalar ro'yxatini olish
@@ -37,65 +37,64 @@ const getAbsentStudents = asyncHandler(async (req, res) => {
     // const branch = req.user.branch;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+    const todayStr = today.toISOString().split('T')[0]; // YYYY-MM-DD format
 
     // 1. Oxirgi 2 kun ichidagi barcha davomat yozuvlarini olish
     const twoDaysAgo = new Date(today);
-    twoDaysAgo.setDate(today.getDate() - 2); 
+    twoDaysAgo.setDate(today.getDate() - 2);
+    const twoDaysAgoStr = twoDaysAgo.toISOString().split('T')[0]; // YYYY-MM-DD format
 
+    // Attendance modelida date String (YYYY-MM-DD) formatida saqlanadi
     const recentAttendances = await Attendance.find({
         // branch,
-        date: { $gte: twoDaysAgo, $lt: today }
+        date: { $gte: twoDaysAgoStr, $lt: todayStr },
+        status: { $in: ['absent', 'late'] } // Faqat kelmagan yoki kechikkan talabalarni olish
     })
     .populate({
-        path: 'group',
+        path: 'groupId',
         select: 'name teacher',
-        populate: { path: 'teacher', select: 'firstName lastName' }
-    });
+        populate: { 
+            path: 'teacher', 
+            select: 'user',
+            populate: { path: 'user', select: 'firstName lastName' }
+        }
+    })
+    .populate('studentId', 'firstName lastName phoneNumber status');
     
     let absentStudents = [];
     
     recentAttendances.forEach(att => {
-        const groupName = att.group.name;
-        const teacherName = `${att.group.teacher.firstName} ${att.group.teacher.lastName}`;
-        const attendanceDate = att.date.toLocaleDateString('uz-UZ');
+        // Faqat faol talabalarni qo'shish
+        if (att.studentId && att.studentId.status === 'Active') {
+            const groupName = att.groupId?.name || 'N/A';
+            const teacher = att.groupId?.teacher?.user;
+            const teacherName = teacher ? `${teacher.firstName} ${teacher.lastName}` : 'N/A';
+            const attendanceDate = att.date; // Already in YYYY-MM-DD format
 
-        att.records.forEach(record => {
-            // Agar talaba kelmagan bo'lsa
-            if (record.status === 'Absent') {
-                absentStudents.push({
-                    studentId: record.student,
-                    groupName,
-                    teacherName,
-                    attendanceDate,
-                });
-            }
-        });
+            absentStudents.push({
+                studentId: att.studentId._id,
+                firstName: att.studentId.firstName,
+                lastName: att.studentId.lastName,
+                phoneNumber: att.studentId.phoneNumber,
+                groupName,
+                teacherName,
+                attendanceDate,
+                status: att.status,
+                reason: att.reason || '',
+            });
+        }
     });
 
-    // Student ID bo'yicha ma'lumotlarni yuklash va takrorlanmas qilish
-    const uniqueAbsentStudentIds = [...new Set(absentStudents.map(a => a.studentId.toString()))];
-    
-    const studentDetails = await Student.find({ 
-        _id: { $in: uniqueAbsentStudentIds },
-        status: 'Active'
-    }).select('firstName lastName phoneNumber');
-    
-    const studentMap = studentDetails.reduce((acc, student) => {
-        acc[student._id.toString()] = student;
-        return acc;
-    }, {});
-    
-    // Natijani formatlash
-    const finalAbsentList = absentStudents
-        .filter(a => studentMap[a.studentId.toString()]) // Faqat faol studentlarni qoldirish
-        .map(a => ({
-            ...a,
-            firstName: studentMap[a.studentId.toString()].firstName,
-            lastName: studentMap[a.studentId.toString()].lastName,
-            phoneNumber: studentMap[a.studentId.toString()].phoneNumber,
-            studentId: undefined, // Keraksiz maydonni o'chirish
-        }));
+    // Takrorlanmas qilish (bir xil talaba bir necha marta bo'lmasligi uchun)
+    const uniqueAbsentMap = new Map();
+    absentStudents.forEach(item => {
+        const key = `${item.studentId}_${item.attendanceDate}`;
+        if (!uniqueAbsentMap.has(key)) {
+            uniqueAbsentMap.set(key, item);
+        }
+    });
 
+    const finalAbsentList = Array.from(uniqueAbsentMap.values());
 
     res.status(200).json({
         message: `Oxirgi 2 kun ichidagi darslarga kelmagan faol talabalar ro'yxati.`,

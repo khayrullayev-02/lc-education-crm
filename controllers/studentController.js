@@ -31,6 +31,7 @@ const getStudents = asyncHandler(async (req, res) => {
 // POST /api/students - Yangi talaba yaratish
 const createStudent = asyncHandler(async (req, res) => {
   const { firstName, lastName, birthDate, phoneNumber, group, status } = req.body;
+  const currentUser = req.user;
 
   if (!firstName || !lastName || !birthDate || !phoneNumber) {
     res.status(400);
@@ -48,6 +49,25 @@ const createStudent = asyncHandler(async (req, res) => {
     if (!existingGroup) {
       res.status(400);
       throw new Error("Belgilangan guruh topilmadi.");
+    }
+
+    // RBAC: Teacher faqat o'z guruhlariga o'quvchi qo'sha oladi
+    if (currentUser.role === 'Teacher') {
+      const teacherProfile = await Teacher.findOne({ user: currentUser._id });
+      if (!teacherProfile) {
+        res.status(404);
+        throw new Error('O\'qituvchi profili topilmadi.');
+      }
+      if (existingGroup.teacher.toString() !== teacherProfile._id.toString()) {
+        res.status(403);
+        throw new Error('Bu guruhga o\'quvchi qo\'shish uchun ruxsat yo\'q. Faqat o\'z guruhlaringizga o\'quvchi qo\'sha olasiz.');
+      }
+    }
+  } else {
+    // Teacher o'quvchi qo'shishda guruh majburiy
+    if (currentUser.role === 'Teacher') {
+      res.status(400);
+      throw new Error("O'qituvchi o'quvchi qo'shishda guruh majburiy.");
     }
   }
 
@@ -104,12 +124,36 @@ const getStudentById = asyncHandler(async (req, res) => {
 // PUT /api/students/:id - Talabani yangilash
 const updateStudent = asyncHandler(async (req, res) => {
   const { firstName, lastName, birthDate, phoneNumber, group, status, isActive } = req.body;
+  const currentUser = req.user;
 
   const student = await Student.findById(req.params.id);
 
   if (!student) {
     res.status(404);
     throw new Error('Talaba topilmadi');
+  }
+
+  // RBAC: Teacher faqat o'z guruhidagi o'quvchini tahrirlay oladi
+  if (currentUser.role === 'Teacher') {
+    const teacherProfile = await Teacher.findOne({ user: currentUser._id });
+    if (!teacherProfile) {
+      res.status(404);
+      throw new Error('O\'qituvchi profili topilmadi.');
+    }
+    const studentGroup = student.group ? await Group.findById(student.group).select('teacher') : null;
+    // Talaba guruhga tegishli bo'lsa va o'qituvchi o'sha guruhning o'qituvchisi bo'lsa
+    if (!studentGroup || studentGroup.teacher.toString() !== teacherProfile._id.toString()) {
+      res.status(403);
+      throw new Error('Bu talabani tahrirlash uchun ruxsat yo\'q. Faqat o\'z guruhlaringizdagi talabalarni tahrirlay olasiz.');
+    }
+    // Agar group o'zgartirilayotgan bo'lsa, yangi guruh ham o'qituvchining guruhlaridan biri bo'lishi kerak
+    if (group && group !== student.group?.toString()) {
+      const newGroup = await Group.findById(group);
+      if (!newGroup || newGroup.teacher.toString() !== teacherProfile._id.toString()) {
+        res.status(403);
+        throw new Error('Bu guruhga o\'quvchini ko\'chirish uchun ruxsat yo\'q. Faqat o\'z guruhlaringizga ko\'chira olasiz.');
+      }
+    }
   }
 
   // Telefon raqami duplicate tekshiruvi
