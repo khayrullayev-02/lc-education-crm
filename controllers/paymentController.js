@@ -228,9 +228,65 @@ const deletePayment = asyncHandler(async (req, res) => {
     res.json({ message: 'To‘lov yozuvi muvaffaqiyatli o‘chirildi va talaba qarzi yangilandi.' });
 });
 
+// @desc    To'lovni yangilash
+// @route   PATCH /api/payments/:id
+// @access  Private/Director, Manager
+const updatePayment = asyncHandler(async (req, res) => {
+  const { amount, date, type, note } = req.body;
+  
+  const payment = await Payment.findById(req.params.id);
+  
+  if (!payment) {
+    res.status(404);
+    throw new Error('To\'lov topilmadi');
+  }
+
+  // Eskirgan qarzni qayta hisoblash uchun talabani olish
+  const student = await Student.findById(payment.student);
+  
+  // Agar summa o'zgargan bo'lsa, qarzni yangilash
+  if (amount && amount !== payment.amount) {
+    const difference = amount - payment.amount;
+    const newDebt = (student.debt || 0) - difference;
+    
+    await Student.findByIdAndUpdate(payment.student, 
+      { debt: newDebt },
+      { new: true }
+    );
+  }
+
+  // To'lovni yangilash
+  if (amount) payment.amount = amount;
+  if (date) {
+    // YYYY-MM-DD formatini tekshirish
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      res.status(400);
+      throw new Error("Sana formati noto'g'ri. YYYY-MM-DD formatida kiriting.");
+    }
+    const paymentDate = new Date(date);
+    if (isNaN(paymentDate.getTime())) {
+      res.status(400);
+      throw new Error("Yaroqsiz sana.");
+    }
+    payment.paymentDate = paymentDate;
+  }
+  if (type) payment.type = type;
+  if (note) payment.note = note;
+  
+  payment.updatedAt = new Date();
+  
+  await payment.save();
+  
+  const updatedPayment = await Payment.findById(payment._id)
+    .populate('student', 'firstName lastName')
+    .populate('group', 'name');
+  
+  res.json(updatedPayment);
+});
+
 module.exports = {
   createPayment,
   getPayments,
+  updatePayment,
   deletePayment,
-  // Payment'ni yangilashga ruxsat bermaymiz, chunki bu moliyaviy yozuv va uni o'chirib qayta yaratish (delete/create) to'g'riroq.
 };

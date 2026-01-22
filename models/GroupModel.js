@@ -59,7 +59,17 @@ const GroupSchema = mongoose.Schema(
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Student',
       }
-    ]
+    ],
+    // Guruh yopiq/ochiq holati (talaba qo'shishni cheklash uchun)
+    isClosed: {
+      type: Boolean,
+      default: false,
+    },
+    // Guruhda talabalar soni (performance uchun)
+    studentCount: {
+      type: Number,
+      default: 0,
+    }
   },
   {
     timestamps: true,

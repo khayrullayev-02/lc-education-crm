@@ -235,6 +235,34 @@ const deleteGroup = asyncHandler(async (req, res) => {
     res.json({ message: 'Guruh muvaffaqiyatli o‘chirildi' });
 });
 
+// @desc    Guruhni yopish (yopiq guruhga yangi o'quvchi qo'shib bo'lmaydi)
+// @route   PATCH /api/groups/:id/close
+// @access  Private/Director, Manager
+const closeGroup = asyncHandler(async (req, res) => {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      res.status(400);
+      throw new Error(`Guruh ID formati yaroqsiz: ${req.params.id}`);
+    }
+    
+    const group = await Group.findByIdAndUpdate(
+      req.params.id,
+      { isClosed: true },
+      { new: true }
+    ).populate('course', 'name').populate('teacher', 'user');
+    
+    if (!group) {
+      res.status(404);
+      throw new Error('Guruh topilmadi');
+    }
+    
+    res.json({
+      _id: group._id,
+      name: group.name,
+      isClosed: true,
+      message: 'Guruh muvaffaqiyatli yopildi. Yangi o\'quvchi qo\'shib bo\'lmaydi.'
+    });
+});
+
 
 module.exports = {
   getGroups,
@@ -242,4 +270,5 @@ module.exports = {
   getGroupById,
   updateGroup,
   deleteGroup,
+  closeGroup,
 };

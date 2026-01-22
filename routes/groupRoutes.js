@@ -6,6 +6,7 @@ const {
   getGroupById,
   updateGroup,
   deleteGroup,
+  closeGroup,
 } = require('../controllers/groupController');
 const { protect, authorizeRoles } = require('../middleware/authMiddleware');
 
@@ -26,5 +27,11 @@ router
   .get(protect, getGroupById) // Barcha kirganlar ko'ra oladi
   .put(protect, authorizeRoles('Director', 'Manager', 'Admin'), updateGroup) // Director va Manager yangilashi mumkin
   .delete(protect, authorizeRoles('Director', 'Manager'), deleteGroup); // Faqat Director o'chirishga ruxsatga ega
+
+// @route PATCH /api/groups/:id/close
+// Guruhni yopish (yangi o'quvchi qo'shib bo'lmaydi)
+router
+  .route('/:id/close')
+  .patch(protect, authorizeRoles('Director', 'Manager', 'Admin'), closeGroup);
 
 module.exports = router;

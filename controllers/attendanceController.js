@@ -196,12 +196,32 @@ const getAttendanceTable = asyncHandler(async (req, res) => {
     attendanceMap[sId][a.date] = { status: a.status, reason: a.reason };
   });
 
+  // Oy ma'lumotlarini hisoblash
+  let responseMonth = month;
+  let totalDays = 31; // Default
+  
+  if (!month && attendances.length > 0) {
+    // Agar oy kiritilmasa, birinchi davomat yozuvidan olinadi
+    const firstDate = attendances[0].date;
+    if (typeof firstDate === 'string') {
+      responseMonth = firstDate.substring(0, 7); // YYYY-MM format
+    }
+  }
+
+  // Agar oy kiritilgan bo'lsa, shu oyning kunlari sonini hisoblash
+  if (responseMonth) {
+    const [year, monthNum] = responseMonth.split('-');
+    totalDays = new Date(year, parseInt(monthNum), 0).getDate();
+  }
+
   const response = {
     students: students.map((s) => ({
       studentId: s._id,
       fullName: `${s.firstName} ${s.lastName}`,
       attendance: attendanceMap[s._id.toString()] || {},
     })),
+    month: responseMonth || null,
+    totalDays: totalDays,
   };
 
   res.status(200).json(response);

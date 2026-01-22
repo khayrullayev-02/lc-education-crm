@@ -51,6 +51,12 @@ const createStudent = asyncHandler(async (req, res) => {
       throw new Error("Belgilangan guruh topilmadi.");
     }
 
+    // Yopiq guruhga o'quvchi qo'shib bo'lmasligini tekshirish
+    if (existingGroup.isClosed) {
+      res.status(400);
+      throw new Error("Bu guruh yopilgan, yangi o'quvchi qo'shib bo'lmaydi");
+    }
+
     // RBAC: Teacher faqat o'z guruhlariga o'quvchi qo'sha oladi
     if (currentUser.role === 'Teacher') {
       const teacherProfile = await Teacher.findOne({ user: currentUser._id });
@@ -231,10 +237,101 @@ const deleteStudent = asyncHandler(async (req, res) => {
   res.json({ message: 'Talaba muvaffaqiyatli o‘chirildi' });
 });
 
+// POST /api/students/:id/transfer - Talabani boshqa guruhga o'tkazish
+const transferStudent = asyncHandler(async (req, res) => {
+  const { group: newGroupId } = req.body;
+  const currentUser = req.user;
+
+  // Talabani topish
+  const student = await Student.findById(req.params.id);
+  if (!student) {
+    res.status(404);
+    throw new Error('O\'quvchi topilmadi');
+  }
+
+  // Yangi guruhni topish
+  if (!newGroupId) {
+    res.status(400);
+    throw new Error("Yangi guruh identifikatori shart.");
+  }
+
+  const newGroup = await Group.findById(newGroupId);
+  if (!newGroup) {
+    res.status(400);
+    throw new Error('Yangi guruh topilmadi');
+  }
+
+  // Yangi guruh yopiq ekanligini tekshirish
+  if (newGroup.isClosed) {
+    res.status(400);
+    throw new Error("Bu guruh yopilgan, o'quvchi qo'shib bo'lmaydi");
+  }
+
+  // RBAC: Faqat Director, Manager yoki guruhning o'qituvchisi o'tkazishi mumkin
+  if (currentUser.role === 'Teacher') {
+    const teacherProfile = await Teacher.findOne({ user: currentUser._id });
+    if (!teacherProfile) {
+      res.status(404);
+      throw new Error('O\'qituvchi profili topilmadi.');
+    }
+    // O'qituvchi faqat o'z guruhidagi talabalarni o'tkazishi mumkin
+    if (!student.group || student.group.toString() !== newGroup.teacher.toString()) {
+      res.status(403);
+      throw new Error('Talabani boshqa guruhga o\'tkazish uchun ruxsat yo\'q.');
+    }
+    // Yangi guruh ham o'qituvchining guruhlaridan biri bo'lishi kerak
+    if (newGroup.teacher.toString() !== teacherProfile._id.toString()) {
+      res.status(403);
+      throw new Error('Talabani bu guruhga o\'tkazish uchun ruxsat yo\'q. Faqat o\'z guruhlaringizga o\'tkazа olasiz.');
+    }
+  } else if (currentUser.role !== 'Director' && currentUser.role !== 'Manager' && currentUser.role !== 'Admin') {
+    res.status(403);
+    throw new Error('Sizga talabani boshqa guruhga o\'tkazish uchun ruxsat berilmagan');
+  }
+
+  // Eski guruhni olish
+  const previousGroupId = student.group;
+  const previousGroup = previousGroupId ? await Group.findById(previousGroupId) : null;
+
+  // Eski guruhdan talabani olib tashlash
+  if (previousGroupId) {
+    await Group.findByIdAndUpdate(previousGroupId, {
+      $pull: { students: student._id },
+      $inc: { studentCount: -1 }
+    });
+  }
+
+  // Yangi guruhga talabani qo'shish
+  await Group.findByIdAndUpdate(newGroupId, {
+    $addToSet: { students: student._id },
+    $inc: { studentCount: 1 }
+  });
+
+  // Talabani yangilash
+  student.group = newGroupId;
+  await student.save();
+
+  res.json({
+    _id: student._id,
+    firstName: student.firstName,
+    lastName: student.lastName,
+    group: {
+      _id: newGroup._id,
+      name: newGroup.name
+    },
+    previousGroup: previousGroup ? {
+      _id: previousGroup._id,
+      name: previousGroup.name
+    } : null,
+    message: 'O\'quvchi muvaffaqiyatli boshqa guruhga o\'tkazildi'
+  });
+});
+
 module.exports = {
   getStudents,
   createStudent,
   getStudentById,
   updateStudent,
   deleteStudent,
+  transferStudent,
 };

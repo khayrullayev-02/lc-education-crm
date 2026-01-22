@@ -6,6 +6,7 @@ const {
   getStudentById,
   updateStudent,
   deleteStudent,
+  transferStudent,
 } = require('../controllers/studentController');
 const { protect, authorizeRoles } = require('../middleware/authMiddleware');
 
@@ -19,5 +20,11 @@ router
   .get(protect, getStudentById)
   .put(protect, authorizeRoles('Director', 'Manager', 'Teacher', 'Admin'), updateStudent)
   .delete(protect, authorizeRoles('Director', 'Manager'), deleteStudent);
+
+// @route POST /api/students/:id/transfer
+// O'quvchini boshqa guruhga o'tkazish
+router
+  .route('/:id/transfer')
+  .post(protect, authorizeRoles('Director', 'Manager', 'Teacher', 'Admin'), transferStudent);
 
 module.exports = router;
