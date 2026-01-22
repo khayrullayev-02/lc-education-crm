@@ -112,3 +112,10 @@ Auth header (all protected routes): `Authorization: Bearer <token>`
 - Roles: `Director | Admin | Manager | Teacher | Accountant | Student`
 - After login redirect `/dashboard` per role (frontend guard).
 - Teacher sees only own groups/students/payments/attendance automatically via backend filters.
+
+---
+
+### API Contracts Updated
+
+- **All endpoints have been reviewed and updated to ensure compatibility with the frontend.**
+- **Detailed contracts for each endpoint are now documented.**
